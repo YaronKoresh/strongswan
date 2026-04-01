@@ -183,6 +183,10 @@ START_TEST(test_asn1_oid_from_string)
 		{ " ", chunk_empty },
 		{ "0.2.262.1", chunk_from_chars(
 			0x02, 0x82, 0x06, 0x01) },
+		{ "2.176.1", chunk_from_chars(
+			0x82, 0x00, 0x01) },
+		{ "2.999.1", chunk_from_chars(
+			0x88, 0x37, 0x01) },
 		{ "1.2.840.10045.4.1", chunk_from_chars(
 			0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x01) },
 		{ "1.3.6.1.4.1.36906.1", chunk_from_chars(
@@ -206,7 +210,10 @@ START_TEST(test_asn1_oid_from_string)
 		{ "0.1.2.3.4.5.6.7.8.9.10.128.129.130.131.132.133.134.135.136.137."
 		  "256.257.258.259.260.261.262.263.264.265.384.385.386.387.388."
 		  "1.2097153", chunk_empty },
-		{ "1.a.2.b.3", chunk_empty }
+		{ "1.a.2.b.3", chunk_empty },
+		{ "1.40.1", chunk_empty },
+		{ "3.1.1", chunk_empty },
+		{ "2.23.140.1.2x", chunk_empty }
 	};
 
 	int i;
@@ -243,6 +250,10 @@ START_TEST(test_asn1_oid_to_string)
 		{  NULL,  chunk_empty },
 		{ "0.2.262.1", chunk_from_chars(
 			0x02, 0x82, 0x06, 0x01) },
+		{ "2.176.1", chunk_from_chars(
+			0x82, 0x00, 0x01) },
+		{ "2.999.1", chunk_from_chars(
+			0x88, 0x37, 0x01) },
 		{ "1.2.840.10045.4.1", chunk_from_chars(
 			0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x01) },
 		{ "1.3.6.1.4.1.36906.1", chunk_from_chars(
@@ -257,7 +268,8 @@ START_TEST(test_asn1_oid_to_string)
 			0x0a, 0x02, 0x64, 0x87, 0x68, 0xce, 0x10, 0x86, 0x8d, 0x20,
 			0xbd, 0x84, 0x40, 0x84, 0xe2, 0xad, 0x00, 0xaf, 0xd7, 0xc2, 0x00,
 		    0xff, 0xff, 0xff, 0x7f) },
-		{ NULL, chunk_from_chars(0x0a, 0x87) }
+		{ NULL, chunk_from_chars(0x0a, 0x87) },
+		{ NULL, chunk_from_chars(0x81) }
 	};
 
 	int i;

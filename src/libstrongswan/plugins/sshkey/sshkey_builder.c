@@ -14,9 +14,8 @@
  * for more details.
  */
 
-#define _GNU_SOURCE /* for fmemopen() */
-#include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 
 #include "sshkey_builder.h"
@@ -50,14 +49,48 @@ static chunk_t parse_ec_identifier(chunk_t identifier)
 	else
 	{
 		char ascii[64];
+		chunk_t value;
 
 		if (snprintf(ascii, sizeof(ascii), "%.*s", (int)identifier.len,
 					 identifier.ptr) < sizeof(ascii))
 		{
-			oid = asn1_wrap(ASN1_OID, "m", asn1_oid_from_string(ascii));
+			value = asn1_oid_from_string(ascii);
+			if (value.len)
+			{
+				oid = asn1_wrap(ASN1_OID, "m", value);
+			}
 		}
 	}
 	return oid;
+}
+
+static sshkey_public_key_t *parse_public_key(chunk_t blob);
+
+static sshkey_public_key_t *load_from_line(char *line)
+{
+	sshkey_public_key_t *public = NULL;
+	chunk_t blob = chunk_empty;
+	enumerator_t *enumerator;
+	char *token;
+
+	if (!strpfx(line, "ssh-rsa") && !strpfx(line, ECDSA_PREFIX) &&
+		!strpfx(line, "ssh-ed25519") && !strpfx(line, "ssh-ed448"))
+	{
+		return NULL;
+	}
+	enumerator = enumerator_create_token(line, " ", " ");
+	if (enumerator->enumerate(enumerator, &token) &&
+		enumerator->enumerate(enumerator, &token))
+	{
+		blob = chunk_from_base64(chunk_from_str(token), NULL);
+	}
+	enumerator->destroy(enumerator);
+	if (blob.ptr)
+	{
+		public = parse_public_key(blob);
+		chunk_free(&blob);
+	}
+	return public;
 }
 
 /**
@@ -164,29 +197,11 @@ static sshkey_public_key_t *parse_public_key(chunk_t blob)
 static sshkey_public_key_t *load_from_stream(FILE *file)
 {
 	sshkey_public_key_t *public = NULL;
-	chunk_t blob = chunk_empty;
-	enumerator_t *enumerator;
-	char line[1024], *token;
+	char line[1024];
 
 	while (!public && fgets(line, sizeof(line), file))
-	{	/* the format is: ssh-<key-type> <key(base64)> <identifier> */
-		if (!strpfx(line, "ssh-rsa") && !strpfx(line, ECDSA_PREFIX) &&
-			!strpfx(line, "ssh-ed25519") && !strpfx(line, "ssh-ed448"))
-		{
-			continue;
-		}
-		enumerator = enumerator_create_token(line, " ", " ");
-		if (enumerator->enumerate(enumerator, &token) &&
-			enumerator->enumerate(enumerator, &token))
-		{
-			blob = chunk_from_base64(chunk_from_str(token), NULL);
-		}
-		enumerator->destroy(enumerator);
-		if (blob.ptr)
-		{
-			public = parse_public_key(blob);
-			chunk_free(&blob);
-		}
+	{
+		public = load_from_line(line);
 	}
 	fclose(file);
 	return public;
@@ -197,14 +212,33 @@ static sshkey_public_key_t *load_from_stream(FILE *file)
  */
 static sshkey_public_key_t *load_from_blob(chunk_t blob)
 {
-	FILE *stream;
+	sshkey_public_key_t *public = NULL;
+	char *current, *line, *next;
 
-	stream = fmemopen(blob.ptr, blob.len, "r");
-	if (!stream)
+	line = malloc(blob.len + 1);
+	if (!line)
 	{
 		return NULL;
 	}
-	return load_from_stream(stream);
+	memcpy(line, blob.ptr, blob.len);
+	line[blob.len] = '\0';
+	current = line;
+	while (!public && current && *current)
+	{
+		next = strchr(current, '\n');
+		if (next)
+		{
+			*next = '\0';
+			if (next > current && next[-1] == '\r')
+			{
+				next[-1] = '\0';
+			}
+		}
+		public = load_from_line(current);
+		current = next ? next + 1 : NULL;
+	}
+	free(line);
+	return public;
 }
 
 /**

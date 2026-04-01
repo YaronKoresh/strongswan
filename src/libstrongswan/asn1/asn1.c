@@ -16,6 +16,8 @@
  * for more details.
  */
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -152,6 +154,47 @@ static int bytes_required(u_int val)
 	return required;
 }
 
+static bool append_oid_value(u_char *buf, size_t buf_len, int *pos, u_int val)
+{
+	int req, shift;
+
+	req = bytes_required(val);
+	if ((size_t)*pos + req > buf_len)
+	{
+		return FALSE;
+	}
+	for (shift = (req - 1) * 7; shift; shift -= 7)
+	{
+		buf[(*pos)++] = 0x80 | ((val >> shift) & 0x7F);
+	}
+	buf[(*pos)++] = val & 0x7F;
+	return TRUE;
+}
+
+static bool read_oid_value(chunk_t *oid, u_int *val)
+{
+	int max_bytes;
+	u_char byte;
+
+	*val = 0;
+	max_bytes = (sizeof(u_int) * 8 + 6) / 7;
+	while (oid->len && max_bytes-- > 0)
+	{
+		byte = *oid->ptr++;
+		oid->len--;
+		if (*val > (UINT_MAX >> 7))
+		{
+			return FALSE;
+		}
+		*val = (*val << 7) | (byte & 0x7F);
+		if (!(byte & 0x80))
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 /*
  * Defined in header.
  */
@@ -161,35 +204,57 @@ chunk_t asn1_oid_from_string(char *str)
 	size_t buf_len = 64;
 	u_char buf[buf_len];
 	char *end;
-	int i = 0, pos = 0, req, shift;
+	int i = 0, pos = 0;
 	u_int val, first = 0;
+	unsigned long num;
 
 	enumerator = enumerator_create_token(str, ".", "");
 	while (enumerator->enumerate(enumerator, &str))
 	{
-		val = strtoul(str, &end, 10);
-		req = bytes_required(val);
-		if (end == str || pos + req > buf_len)
+		errno = 0;
+		num = strtoul(str, &end, 10);
+		if (end == str || *end != '\0' || errno == ERANGE || num > UINT_MAX)
 		{
 			pos = 0;
 			break;
 		}
+		val = num;
 		switch (i++)
 		{
 			case 0:
+				if (val > 2)
+				{
+					pos = 0;
+					goto end;
+				}
 				first = val;
 				break;
 			case 1:
-				buf[pos++] = first * 40 + val;
+				if (first < 2 && val > 39)
+				{
+					pos = 0;
+					goto end;
+				}
+				if (!append_oid_value(buf, buf_len, &pos, first * 40 + val))
+				{
+					pos = 0;
+					goto end;
+				}
 				break;
 			default:
-				for (shift = (req - 1) * 7; shift; shift -= 7)
+				if (!append_oid_value(buf, buf_len, &pos, val))
 				{
-					buf[pos++] = 0x80 | ((val >> shift) & 0x7F);
+					pos = 0;
+					goto end;
 				}
-				buf[pos++] = val & 0x7F;
 		}
 	}
+	if (i < 2)
+	{
+		pos = 0;
+	}
+
+end:
 	enumerator->destroy(enumerator);
 
 	return chunk_clone(chunk_create(buf, pos));
@@ -203,41 +268,50 @@ char *asn1_oid_to_string(chunk_t oid)
 	size_t len = 64;
 	char buf[len], *pos = buf;
 	int written;
-	u_int val;
+	u_int first, second, val;
 
-	if (!oid.len)
+	if (!read_oid_value(&oid, &val))
 	{
 		return NULL;
 	}
-	val = oid.ptr[0] / 40;
-	written = snprintf(buf, len, "%u.%u", val, oid.ptr[0] - val * 40);
-	oid = chunk_skip(oid, 1);
+	if (val < 40)
+	{
+		first = 0;
+		second = val;
+	}
+	else if (val < 80)
+	{
+		first = 1;
+		second = val - 40;
+	}
+	else
+	{
+		first = 2;
+		second = val - 80;
+	}
+	written = snprintf(buf, len, "%u.%u", first, second);
 	if (written < 0 || written >= len)
 	{
 		return NULL;
 	}
 	pos += written;
 	len -= written;
-	val = 0;
 
 	while (oid.len)
 	{
-		val = (val << 7) + (u_int)(oid.ptr[0] & 0x7f);
-
-		if (oid.ptr[0] < 128)
+		if (!read_oid_value(&oid, &val))
 		{
-			written = snprintf(pos, len, ".%u", val);
-			if (written < 0 || written >= len)
-			{
-				return NULL;
-			}
-			pos += written;
-			len -= written;
-			val = 0;
+			return NULL;
 		}
-		oid = chunk_skip(oid, 1);
+		written = snprintf(pos, len, ".%u", val);
+		if (written < 0 || written >= len)
+		{
+			return NULL;
+		}
+		pos += written;
+		len -= written;
 	}
-	return (val == 0) ? strdup(buf) : NULL;
+	return strdup(buf);
 }
 
 /*

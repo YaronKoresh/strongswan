@@ -57,7 +57,10 @@ $max_order = 0;
 
 while ($line = <SRC>)
 {
+	chomp($line);
+	$line =~ s/\r\z//;
     $line =~ m/( *?)(0x\w{2})\s+(".*?")[ \t]*?([\w_]*?)\Z/;
+	die "could not parse oid.txt line $.: $line\n" unless defined($1);
 
     @order[$counter] = length($1);
     @octet[$counter] = $2;

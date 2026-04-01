@@ -16,7 +16,11 @@
 
 #include "test_suite.h"
 
+#include <bio/bio_reader.h>
+#include <bio/bio_writer.h>
 #include <plugins/plugin_feature.h>
+
+#define SSH_ECDSA_PREFIX "ecdsa-sha2-"
 
 /**
  * Signature schemes to test
@@ -338,6 +342,103 @@ START_TEST(test_load)
 }
 END_TEST
 
+static bool get_ssh_blob(chunk_t spki, chunk_t *blob)
+{
+	public_key_t *pubkey;
+	chunk_t sshkey;
+
+	pubkey = lib->creds->create(lib->creds, CRED_PUBLIC_KEY, KEY_ECDSA,
+							 BUILD_BLOB_ASN1_DER, spki, BUILD_END);
+	if (!pubkey)
+	{
+		return FALSE;
+	}
+	if (!pubkey->get_encoding(pubkey, PUBKEY_SSHKEY, &sshkey))
+	{
+		pubkey->destroy(pubkey);
+		return FALSE;
+	}
+	pubkey->destroy(pubkey);
+	*blob = chunk_from_base64(sshkey, NULL);
+	chunk_free(&sshkey);
+	return blob->ptr != NULL;
+}
+
+static bool build_ssh_blob_with_identifier(chunk_t spki, char *identifier,
+										 chunk_t *blob)
+{
+	bio_reader_t *reader;
+	bio_writer_t *writer;
+	chunk_t input, format, curve, q;
+	char prefixed[128];
+
+	if (!get_ssh_blob(spki, &input))
+	{
+		return FALSE;
+	}
+	reader = bio_reader_create(input);
+	if (!reader->read_data32(reader, &format) ||
+		!reader->read_data32(reader, &curve) ||
+		!reader->read_data32(reader, &q) ||
+		reader->remaining(reader) != 0 ||
+		snprintf(prefixed, sizeof(prefixed), SSH_ECDSA_PREFIX "%s",
+				 identifier) >= sizeof(prefixed))
+	{
+		reader->destroy(reader);
+		chunk_free(&input);
+		return FALSE;
+	}
+	writer = bio_writer_create(0);
+	writer->write_data32(writer, chunk_from_str(prefixed));
+	writer->write_data32(writer, chunk_from_str(identifier));
+	writer->write_data32(writer, q);
+	*blob = writer->extract_buf(writer);
+	writer->destroy(writer);
+	reader->destroy(reader);
+	chunk_free(&input);
+	return TRUE;
+}
+
+START_TEST(test_load_ssh_oid_identifier)
+{
+	public_key_t *pubkey;
+	chunk_t blob = chunk_empty, encoding = chunk_empty;
+
+	if (!build_ssh_blob_with_identifier(keys[0].pub,
+									"1.2.840.10045.3.1.7", &blob))
+	{
+		warn("PUBKEY_SSHKEY encoding not supported, skip test");
+		return;
+	}
+	pubkey = lib->creds->create(lib->creds, CRED_PUBLIC_KEY, KEY_ANY,
+						   BUILD_BLOB_SSHKEY, blob, BUILD_END);
+	ck_assert(pubkey != NULL);
+	ck_assert(pubkey->get_encoding(pubkey, PUBKEY_SPKI_ASN1_DER, &encoding));
+	ck_assert_chunk_eq(keys[0].pub, encoding);
+	chunk_free(&encoding);
+	pubkey->destroy(pubkey);
+	chunk_free(&blob);
+}
+END_TEST
+
+START_TEST(test_reject_ssh_oid_identifier_garbage)
+{
+	public_key_t *pubkey;
+	chunk_t blob = chunk_empty;
+
+	if (!build_ssh_blob_with_identifier(keys[0].pub,
+									"1.2.840.10045.3.1.7x", &blob))
+	{
+		warn("PUBKEY_SSHKEY encoding not supported, skip test");
+		return;
+	}
+	pubkey = lib->creds->create(lib->creds, CRED_PUBLIC_KEY, KEY_ANY,
+						   BUILD_BLOB_SSHKEY, blob, BUILD_END);
+	ck_assert(pubkey == NULL);
+	chunk_free(&blob);
+}
+END_TEST
+
 /**
  * ECDSA-256 key from above, converted with: openssl ec -param_enc explicit
  */
@@ -438,6 +539,8 @@ Suite *ecdsa_suite_create()
 	tc = tcase_create("load");
 	tcase_add_loop_test(tc, test_load, 0, countof(keys));
 	tcase_add_test(tc, test_load_reject_explicit_params);
+	tcase_add_test(tc, test_load_ssh_oid_identifier);
+	tcase_add_test(tc, test_reject_ssh_oid_identifier_garbage);
 	suite_add_tcase(s, tc);
 
 	return s;

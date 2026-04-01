@@ -270,7 +270,9 @@ if STATIC_PLUGIN_CONSTRUCTORS
 BUILT_SOURCES += $(srcdir)/plugin_constructors.c
 CLEANFILES = $(srcdir)/plugin_constructors.c
 
-$(srcdir)/plugin_constructors.c: $(srcdir)/plugins/plugin_constructors.py
+FORCE:
+
+$(srcdir)/plugin_constructors.c: FORCE $(srcdir)/plugins/plugin_constructors.py
 		$(AM_V_GEN) \
 		$(PYTHON) $(srcdir)/plugins/plugin_constructors.py ${s_plugins} > $@
 endif

@@ -266,6 +266,22 @@ START_TEST(test_valid_any2)
 }
 END_TEST
 
+START_TEST(test_valid_large_second_arc)
+{
+	certificate_t *ca, *im, *sj;
+
+	ca = create_cert(NULL, "CN=CA", "2.176.1", X509_CA, NULL, NULL);
+	im = create_cert(ca, "CN=IM", "2.176.1", X509_CA, NULL, NULL);
+	sj = create_cert(im, "CN=SJ", "2.176.1", 0, NULL, NULL);
+
+	creds->add_cert(creds, TRUE, ca);
+	creds->add_cert(creds, FALSE, im);
+	creds->add_cert(creds, FALSE, sj);
+
+	ck_assert(check_oid(sj->get_subject(sj), "2.176.1"));
+}
+END_TEST
+
 START_TEST(test_invalid_missing)
 {
 	certificate_t *ca, *im, *sj;
@@ -586,6 +602,7 @@ Suite *certpolicy_suite_create()
 	tcase_add_test(tc, test_valid_fixed);
 	tcase_add_test(tc, test_valid_any1);
 	tcase_add_test(tc, test_valid_any2);
+	tcase_add_test(tc, test_valid_large_second_arc);
 	suite_add_tcase(s, tc);
 
 	tc = tcase_create("policy invalid");
