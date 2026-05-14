@@ -6,12 +6,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  actions: write
+
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_CONTAINER: /root/.ccache
   CCACHE_COMPILERCHECK: content
   CCACHE_COMPRESS: true
-  CCACHE_MAXSIZE: 200M
+  CCACHE_MAXSIZE: 100M
 
 jobs:
   pre-check:
@@ -31,13 +34,12 @@ jobs:
     env:
       TEST: tkm
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v6
+      - uses: actions/cache/restore@v5
+        id: cache-restore
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-tkm-${{ github.sha }}
-          restore-keys: |
-            ccache-tkm-
+          key: ccache-tkm
       - name: Build Docker Image
         run: docker build -t strongswan-tkm -f testing/tkm/Dockerfile testing
       - name: Run Tests in Container
@@ -72,5 +74,16 @@ jobs:
             echo '### run the tests against TKM and get TKM log'; \
             make -j check TESTS_RUNNERS=tkm TESTS_TKM=1 || exit 1; \
             cat /tmp/tkm.log; \
-            ccache -s; \
+            ccache -sv; \
             "
+      # delete old cache entry as we currently can't update it any other way
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        if: github.event_name == 'push' && steps.cache-restore.outputs.cache-hit
+        continue-on-error: true
+        run: gh cache delete -r ${{ github.ref }} ${{ steps.cache-restore.outputs.cache-primary-key }}
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}

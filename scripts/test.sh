@@ -4,7 +4,7 @@
 build_botan()
 {
 	# same revision used in the build recipe of the testing environment
-	BOTAN_REV=3.10.0
+	BOTAN_REV=3.12.0
 	BOTAN_DIR=$DEPS_BUILD_DIR/botan
 
 	if test -d "$BOTAN_DIR"; then
@@ -39,7 +39,7 @@ build_botan()
 
 build_wolfssl()
 {
-	WOLFSSL_REV=v5.9.0-stable
+	WOLFSSL_REV=v5.9.1-stable
 	WOLFSSL_DIR=$DEPS_BUILD_DIR/wolfssl
 
 	if test -d "$WOLFSSL_DIR"; then
@@ -94,7 +94,7 @@ build_tss2()
 
 build_openssl()
 {
-	SSL_REV=openssl-3.6.1
+	: ${SSL_REV=openssl-3.6.1}
 	SSL_DIR=$DEPS_BUILD_DIR/openssl
 	SSL_INS=$DEPS_PREFIX/ssl
 	SSL_OPT="-d shared no-dtls no-ssl3 no-zlib no-idea no-psk
@@ -102,17 +102,6 @@ build_openssl()
 
 	if test -d "$SSL_DIR"; then
 		return
-	fi
-
-	if test "$LEAK_DETECTIVE" = "yes"; then
-		# insist on compiling with gcc and debug information as symbols are
-		# otherwise not found, but we can disable SRP (see below)
-		SSL_OPT="$SSL_OPT no-srp CC=gcc -d"
-	elif test "$CC" != "clang"; then
-		# when using ASan with clang, llvm-symbolizer is used to resolve symbols
-		# and this tool links libcurl, which in turn requires SRP, so we can
-		# only disable it when not building with clang
-		SSL_OPT="$SSL_OPT no-srp"
 	fi
 
 	echo "$ build_openssl()"
@@ -134,7 +123,7 @@ build_openssl()
 
 build_awslc()
 {
-	LC_REV=1.70.0
+	LC_REV=1.72.0
 	LC_PKG=aws-lc-$LC_REV
 	LC_DIR=$DEPS_BUILD_DIR/$LC_PKG
 	LC_SRC=https://github.com/aws/aws-lc/archive/refs/tags/v${LC_REV}.tar.gz
@@ -222,7 +211,7 @@ DEPS="libgmp-dev"
 CFLAGS="-g -O2"
 
 case "$TEST" in
-default)
+default|ld)
 	# should be the default, but lets make sure
 	CONFIG="--with-printf-hooks=glibc"
 	if system_uses_openssl3; then
@@ -235,6 +224,10 @@ openssl*)
 	DEPS="libssl-dev"
 	if test "$TEST" = "openssl-3"; then
 		DEPS=""
+		use_custom_openssl $1
+	elif test "$TEST" = "openssl-4"; then
+		DEPS=""
+		SSL_REV=openssl-4.0.0
 		use_custom_openssl $1
 	elif test "$TEST" = "openssl-awslc"; then
 		DEPS="cmake ninja-build golang"
@@ -342,37 +335,55 @@ win*)
 			--enable-eap-tnc --enable-eap-ttls --enable-eap-identity
 			--enable-eap-radius
 			--enable-updown --enable-ext-auth --enable-libipsec --enable-pkcs11
-			--enable-tnccs-20 --enable-imc-attestation --enable-imv-attestation
-			--enable-imc-os --enable-imv-os --enable-tnc-imv --enable-tnc-imc
+			--enable-tnccs-20
 			--enable-pki --enable-swanctl --enable-socket-win
 			--enable-kernel-iph --enable-kernel-wfp --enable-winhttp"
-	# no make check for Windows binaries unless we run on a windows host
-	if test "$APPVEYOR" != "True"; then
-		TARGET=
-	else
-		CONFIG="$CONFIG --enable-openssl"
+	# on AppVeyor we only build against old OpenSSL versions
+	if test "$APPVEYOR" = "True"; then
+		CONFIG="--disable-defaults  --enable-static --enable-pki --enable-openssl --enable-pem --enable-drbg"
 		CFLAGS="$CFLAGS -I$OPENSSL_DIR/include"
 		LDFLAGS="-L$OPENSSL_DIR/lib -fuse-ld=lld"
 		case "$IMG" in
-		2015)
+		2017)
 			# gcc/ld might be too old to find libeay32 via .lib instead of .dll
 			LDFLAGS="-L$OPENSSL_DIR"
 			;;
 		esac
 		export LDFLAGS
+	# no make check for Windows binaries unless we run on a Windows host
+	# building natively is slow, so don't build libimcv to save several minutes
+	elif test "$OS_NAME" != "windows"; then
+		TARGET=
+		CONFIG="$CONFIG --enable-imc-attestation --enable-imv-attestation
+				--enable-imc-os --enable-imv-os --enable-tnc-imv --enable-tnc-imc"
+		DEPS="gcc-mingw-w64-base"
+		case "$TEST" in
+		win64)
+			DEPS="gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev $DEPS"
+			;;
+		win32)
+			DEPS="gcc-mingw-w64-i686 binutils-mingw-w64-i686 mingw-w64-i686-dev $DEPS"
+			;;
+		esac
+	else
+		CONFIG="$CONFIG --enable-openssl --enable-drbg"
+		DEPS="base-devel git autotools gperf"
+		case "$TEST" in
+		win64)
+			DEPS="$DEPS mingw-w64-x86_64-toolchain"
+			;;
+		win32)
+			DEPS="$DEPS mingw-w64-i686-toolchain"
+			;;
+		esac
 	fi
 	CFLAGS="$CFLAGS -mno-ms-bitfields"
-	DEPS="gcc-mingw-w64-base"
 	case "$TEST" in
 	win64)
 		CONFIG="--host=x86_64-w64-mingw32 $CONFIG --enable-dbghelp-backtraces"
-		DEPS="gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev $DEPS"
-		CC="x86_64-w64-mingw32-gcc"
 		;;
 	win32)
 		CONFIG="--host=i686-w64-mingw32 $CONFIG"
-		DEPS="gcc-mingw-w64-i686 binutils-mingw-w64-i686 mingw-w64-i686-dev $DEPS"
-		CC="i686-w64-mingw32-gcc"
 		;;
 	esac
 	;;
@@ -433,6 +444,8 @@ fuzzing)
 	CFLAGS="$CFLAGS -DNO_CHECK_MEMWIPE"
 	CONFIG="--enable-fuzzing --enable-static --disable-shared --disable-scripts
 			--enable-imc-test --enable-tnccs-20 --enable-eap-radius"
+	# enable the custom crypto plugins
+	CONFIG="$CONFIG --enable-sha1 --enable-sha2 --enable-sha3 --enable-mgf1 --enable-gmp"
 	# don't run any of the unit tests
 	export TESTS_RUNNERS=
 	# prepare corpora
@@ -494,6 +507,9 @@ deps)
 		pkg install -y automake autoconf libtool pkgconf && \
 		pkg install -y bison flex gperf $DEPS
 		;;
+	windows)
+		pacman --noconfirm -S --needed $DEPS
+		;;
 	esac
 	exit $?
 	;;
@@ -532,6 +548,7 @@ if [ ! -f ./configure ]; then
 fi
 
 cd $BUILD_DIR
+echo "$ LDFLAGS=\"$LDFLAGS\""
 echo "$ CC=$CC CFLAGS=\"$CFLAGS\" ./configure $CONFIG"
 CC="$CC" CFLAGS="$CFLAGS" $SRC_DIR/configure $CONFIG || exit $?
 
