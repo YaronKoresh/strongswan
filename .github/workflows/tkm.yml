@@ -6,15 +6,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  actions: write
-
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_CONTAINER: /root/.ccache
   CCACHE_COMPILERCHECK: content
   CCACHE_COMPRESS: true
   CCACHE_MAXSIZE: 100M
+  EVICT_CCACHE_AGE: 1200s
 
 jobs:
   pre-check:
@@ -31,6 +29,8 @@ jobs:
     needs: pre-check
     if: ${{ needs.pre-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     env:
       TEST: tkm
     steps:
@@ -52,6 +52,7 @@ jobs:
             -e CCACHE_COMPILERCHECK \
             -e CCACHE_COMPRESS \
             -e CCACHE_MAXSIZE \
+            -e EVICT_CCACHE_AGE \
             strongswan-tkm \
             bash -c "ccache -z; \
             echo '### build charon-tkm'; \
@@ -74,6 +75,8 @@ jobs:
             echo '### run the tests against TKM and get TKM log'; \
             make -j check TESTS_RUNNERS=tkm TESTS_TKM=1 || exit 1; \
             cat /tmp/tkm.log; \
+            ccache -sv; \
+            ccache --evict-older-than $EVICT_CCACHE_AGE; \
             ccache -sv; \
             "
       # delete old cache entry as we currently can't update it any other way

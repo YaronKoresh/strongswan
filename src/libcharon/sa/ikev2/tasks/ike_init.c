@@ -367,7 +367,7 @@ static bool build_payloads(private_ike_init_t *this, message_t *message)
 
 	if (this->initiator)
 	{
-		proposal_list = ike_cfg->get_proposals(ike_cfg);
+		proposal_list = ike_cfg->get_proposals(ike_cfg, TRUE);
 		other_ke_methods = linked_list_create();
 		enumerator = proposal_list->create_enumerator(proposal_list);
 		while (enumerator->enumerate(enumerator, (void**)&proposal))
@@ -600,14 +600,7 @@ static bool additional_key_exchange_required(private_ike_init_t *this)
  */
 static void clear_key_exchanges(private_ike_init_t *this)
 {
-	int i;
-
-	for (i = 0; i < MAX_KEY_EXCHANGES; i++)
-	{
-		this->key_exchanges[i].type = 0;
-		this->key_exchanges[i].method = 0;
-		this->key_exchanges[i].done = FALSE;
-	}
+	memset(this->key_exchanges, 0, sizeof(this->key_exchanges));
 	this->ke_index = 0;
 
 	array_destroy_offset(this->kes, offsetof(key_exchange_t, destroy));
@@ -1014,6 +1007,7 @@ static bool derive_keys_internal(private_ike_init_t *this, chunk_t nonce_i,
 		 * our own SA as old SA to get SK_d */
 		old_sa = this->ike_sa;
 		array_insert_create(&kes, ARRAY_HEAD, this->ke);
+		this->ke = NULL;
 	}
 
 	id = this->ike_sa->get_id(this->ike_sa);
@@ -1029,7 +1023,7 @@ static bool derive_keys_internal(private_ike_init_t *this, chunk_t nonce_i,
 	}
 	if (kes != this->kes)
 	{
-		array_destroy(kes);
+		array_destroy_offset(kes, offsetof(key_exchange_t, destroy));
 	}
 	return success;
 }
@@ -1222,7 +1216,7 @@ static void raise_alerts(private_ike_init_t *this, notify_type_t type)
 	{
 		case NO_PROPOSAL_CHOSEN:
 			ike_cfg = this->ike_sa->get_ike_cfg(this->ike_sa);
-			list = ike_cfg->get_proposals(ike_cfg);
+			list = ike_cfg->get_proposals(ike_cfg, FALSE);
 			charon->bus->alert(charon->bus, ALERT_PROPOSAL_MISMATCH_IKE, list);
 			list->destroy_offset(list, offsetof(proposal_t, destroy));
 			break;

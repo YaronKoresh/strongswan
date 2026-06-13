@@ -6,9 +6,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  actions: write
-
 env:
   TESTS_REDUCED_KEYLENGTHS: yes
   CCACHE_COMPRESS: true
@@ -16,6 +13,7 @@ env:
   # since the compilers are newly installed every time, we have to use this to
   # avoid cache misses
   CCACHE_COMPILERCHECK: content
+  EVICT_CCACHE_AGE: 1200s
   MONOLITHIC: yes
 
 jobs:
@@ -33,6 +31,8 @@ jobs:
     needs: pre-check
     if: ${{ needs.pre-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     strategy:
       matrix:
         test: [ win64, win32 ]
@@ -53,6 +53,10 @@ jobs:
           ccache -sz
       - uses: ./.github/actions/default
       - run: ccache -sv
+      - if: github.event_name == 'push'
+        run: |
+          ccache --evict-older-than ${{ env.EVICT_CCACHE_AGE }}
+          ccache -sv
       # delete old cache entry as we currently can't update it any other way
       - env:
           GH_TOKEN: ${{ github.token }}
@@ -75,6 +79,8 @@ jobs:
     needs: pre-check
     if: ${{ needs.pre-check.outputs.should_skip != 'true' }}
     runs-on: windows-latest
+    permissions:
+      actions: write
     strategy:
       matrix:
         include:
@@ -114,6 +120,10 @@ jobs:
         # sometimes streaming/threading tests hang completely
         timeout-minutes: 30
       - run: ccache -sv
+      - if: github.event_name == 'push'
+        run: |
+          ccache --evict-older-than ${{ env.EVICT_CCACHE_AGE }}
+          ccache -sv
       # delete old cache entry as we currently can't update it any other way
       - env:
           GH_TOKEN: ${{ github.token }}

@@ -6,14 +6,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  actions: write
-
 env:
   TESTS_REDUCED_KEYLENGTHS: yes
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_COMPRESS: true
   CCACHE_MAXSIZE: 100M
+  EVICT_CCACHE_AGE: 1200s
   OS_NAME: macos
 
 jobs:
@@ -35,6 +33,8 @@ jobs:
     if: ${{ needs.pre-check.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    permissions:
+      actions: write
     env:
       TEST: macos
     steps:
@@ -52,6 +52,10 @@ jobs:
           ccache -z
       - uses: ./.github/actions/default
       - run: ccache -sv
+      - if: github.event_name == 'push'
+        run: |
+          ccache --evict-older-than ${{ env.EVICT_CCACHE_AGE }}
+          ccache -sv
       # delete old cache entry as we currently can't update it any other way
       - env:
           GH_TOKEN: ${{ github.token }}

@@ -5,6 +5,7 @@ AM_CPPFLAGS = @CPPFLAGS@ \
 	-I$(top_srcdir)/src/libimcv \
 	-I$(top_srcdir)/src/libtncif \
 	-I$(top_srcdir)/src/libtpmtss \
+	-I$(top_srcdir)/src/libtls \
 	-I$(top_srcdir)/src/libtnccs \
 	-I$(top_srcdir)/src/libtnccs/plugins/tnccs_20 \
 	-I$(top_srcdir)/src/libradius
@@ -38,9 +39,17 @@ pb_tnc_ldflags = \
 	$(top_builddir)/src/libtncif/.libs/libtncif.a \
 	$(fuzz_ldflags)
 
-ike_ldflags = \
+charon_ldflags = \
 	$(top_builddir)/src/libcharon/.libs/libcharon.a \
 	$(top_builddir)/src/libradius/.libs/libradius.a \
+	$(fuzz_ldflags)
+
+radius_ldflags = \
+	$(top_builddir)/src/libradius/.libs/libradius.a \
+	$(fuzz_ldflags)
+
+tls_ldflags = \
+	$(top_builddir)/src/libtls/.libs/libtls.a \
 	$(fuzz_ldflags)
 
 # fuzzers that use crypto plugins in a significant way
@@ -51,7 +60,7 @@ fuzzers_with_def = $(fuzzers_with_plugins:%=%_def)
 fuzzers_with_cus = $(fuzzers_with_plugins:%=%_cus)
 
 fuzzers_no_plugins = \
-	fuzz_ids fuzz_ike fuzz_pa_tnc fuzz_pb_tnc
+	fuzz_ids fuzz_ike fuzz_pa_tnc fuzz_pb_tnc fuzz_radius fuzz_tls fuzz_vici
 
 ALL_FUZZERS=$(fuzzers_with_def) $(fuzzers_with_cus) $(fuzzers_no_plugins)
 
@@ -93,7 +102,16 @@ fuzz_ids: fuzz_ids.c ${libfuzzer}
 	$(CC) $(AM_CPPFLAGS) $(CFLAGS) -o $@ $< $(fuzz_ldflags)
 
 fuzz_ike: fuzz_ike.c ${libfuzzer}
-	$(CC) $(AM_CPPFLAGS) $(CFLAGS) -o $@ $< $(ike_ldflags)
+	$(CC) $(AM_CPPFLAGS) $(CFLAGS) -o $@ $< $(charon_ldflags)
+
+fuzz_radius: fuzz_radius.c ${libfuzzer}
+	$(CC) $(fuzz_cppflags_def) $(CFLAGS) -o $@ $< $(radius_ldflags)
+
+fuzz_tls: fuzz_tls.c ${libfuzzer}
+	$(CC) $(fuzz_cppflags_def) $(CFLAGS) -o $@ $< $(tls_ldflags)
+
+fuzz_vici: fuzz_vici.c ${libfuzzer}
+	$(CC) $(AM_CPPFLAGS) $(CFLAGS) -o $@ $< $(charon_ldflags)
 
 noinst_LIBRARIES = libFuzzerLocal.a
 libFuzzerLocal_a_SOURCES = libFuzzerLocal.c
